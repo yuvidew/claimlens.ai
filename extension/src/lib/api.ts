@@ -32,7 +32,7 @@ type ApiResponse =
   | { success: true; data: ExtensionReport }
   | { success: false; error: string };
 
-const apiBaseUrl = "http://localhost:3000";
+const apiBaseUrl = "https://claimlens-ai.vercel.app";
 
 export async function analyzeYouTubeClaims(input: {
   context: ClaimLensVideoContext;

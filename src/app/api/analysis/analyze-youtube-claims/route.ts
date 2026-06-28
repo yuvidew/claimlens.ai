@@ -88,21 +88,16 @@ export async function POST(request: Request) {
       body.segmentEndSec,
     );
 
-    if (selectedTranscriptSegments.length === 0) {
-      return jsonResponse(
-        {
-          success: false,
-          error:
-            "No transcript was found for this video segment. Caption-based analysis is required in the MVP.",
-        },
-        422,
-      );
-    }
-
     const excludedClaimKeys = new Set(body.excludedClaimKeys);
-    const transcriptText = formatTranscriptForPrompt(
-      selectedTranscriptSegments,
-    );
+    const transcriptText =
+      selectedTranscriptSegments.length > 0
+        ? formatTranscriptForPrompt(selectedTranscriptSegments)
+        : createMetadataFallbackTranscript({
+            channelName: body.channelName,
+            currentTimeSec: body.currentTimeSec,
+            videoTitle: body.videoTitle,
+            youtubeUrl: body.youtubeUrl,
+          });
     const searchResults = await searchEvidence(
       buildEvidenceQuery(body.videoTitle, transcriptText),
       body.searchDepth,
@@ -310,6 +305,7 @@ function buildPrompt(input: {
 
 Important limits:
 - Extract up to ${input.maxClaims} checkable factual claims from the transcript excerpt, not just the title.
+- If the excerpt says captions were not available, create only cautious topic-level claims from metadata and mark weak evidence as "Insufficient" or "Mixed".
 - Do not repeat claims whose normalized claim keys are already analyzed.
 - Keep timestamps aligned to the transcript line where the claim appears.
 - Use only the supplied evidence snippets for verdicts.
@@ -351,27 +347,45 @@ Return exactly this JSON shape:
 async function getTranscriptSegments(
   videoId: string,
 ): Promise<TranscriptSegment[]> {
-  try {
-    const transcript = await fetchTranscript(videoId, { lang: "en" });
-    const timingScale = transcript.some((entry) => entry.duration > 100)
-      ? 1000
-      : 1;
+  const transcriptAttempts = [
+    () => fetchTranscript(videoId, { lang: "en" }),
+    () => fetchTranscript(videoId, { lang: "en-US" }),
+    () => fetchTranscript(videoId),
+  ];
 
-    return transcript
-      .map((entry) => {
-        const startSec = entry.offset / timingScale;
-        const durationSec = entry.duration / timingScale;
+  for (const fetchTranscriptAttempt of transcriptAttempts) {
+    try {
+      const transcript = await fetchTranscriptAttempt();
+      const segments = normalizeTranscriptEntries(transcript);
 
-        return {
-          endSec: startSec + durationSec,
-          startSec,
-          text: entry.text.replace(/\s+/g, " ").trim(),
-        };
-      })
-      .filter((entry) => entry.text.length > 0);
-  } catch {
-    return [];
+      if (segments.length > 0) {
+        return segments;
+      }
+    } catch {}
   }
+
+  return [];
+}
+
+function normalizeTranscriptEntries(
+  transcript: Array<{ duration: number; offset: number; text: string }>,
+) {
+  const timingScale = transcript.some((entry) => entry.duration > 100)
+    ? 1000
+    : 1;
+
+  return transcript
+    .map((entry) => {
+      const startSec = entry.offset / timingScale;
+      const durationSec = entry.duration / timingScale;
+
+      return {
+        endSec: startSec + durationSec,
+        startSec,
+        text: entry.text.replace(/\s+/g, " ").trim(),
+      };
+    })
+    .filter((entry) => entry.text.length > 0);
 }
 
 function selectTranscriptSegments(
@@ -402,6 +416,21 @@ function formatTranscriptForPrompt(transcriptSegments: TranscriptSegment[]) {
   return transcript.length > 5000
     ? `${transcript.slice(0, 5000)}\n[Transcript clipped for MVP analysis]`
     : transcript;
+}
+
+function createMetadataFallbackTranscript(input: {
+  youtubeUrl: string;
+  videoTitle?: string;
+  channelName?: string;
+  currentTimeSec?: number;
+}) {
+  return [
+    "[00:00] Captions were not available from YouTube for this request.",
+    `[00:00] Video title: ${input.videoTitle ?? "Unknown"}`,
+    `[00:00] Channel: ${input.channelName ?? "Unknown"}`,
+    `[00:00] URL: ${input.youtubeUrl}`,
+    `[00:00] Current playback time: ${typeof input.currentTimeSec === "number" ? formatTimestamp(input.currentTimeSec) : "Unknown"}`,
+  ].join("\n");
 }
 
 function buildEvidenceQuery(

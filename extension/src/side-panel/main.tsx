@@ -120,11 +120,17 @@ function SidePanel() {
       setIsCacheReady(true);
       setLastAnalyzedSegmentStartSec(null);
       setReport(null);
+      chrome.storage.local.remove(currentAnalysisCacheKey);
       return;
     }
 
     let isDisposed = false;
     setIsCacheReady(false);
+    setAnalyzedClaimKeys([]);
+    setAnalyzedSegmentKeys([]);
+    setAnalysisError(null);
+    setLastAnalyzedSegmentStartSec(null);
+    setReport(null);
 
     void loadCachedAnalysis(activeVideoId).then((cachedAnalysis) => {
       if (isDisposed) {
@@ -915,18 +921,31 @@ function isVideoContext(value: unknown): value is ClaimLensVideoContext {
 type CachedAnalysis = {
   claimKeys: string[];
   claims: ExtensionClaim[];
+  videoId: string;
 };
+
+const currentAnalysisCacheKey = "claimlens:current-analysis";
+const legacyAnalysisCachePrefix = "claimlens:analysis:";
 
 function loadCachedAnalysis(videoId: string): Promise<CachedAnalysis> {
   return new Promise((resolve) => {
-    chrome.storage.local.get(getAnalysisCacheKey(videoId), (result) => {
-      const value = result[getAnalysisCacheKey(videoId)] as
+    chrome.storage.local.get(currentAnalysisCacheKey, (result) => {
+      const value = result[currentAnalysisCacheKey] as
         | Partial<CachedAnalysis>
         | undefined;
+
+      void removeLegacyAnalysisCaches();
+
+      if (value?.videoId !== videoId) {
+        chrome.storage.local.remove(currentAnalysisCacheKey);
+        resolve({ claimKeys: [], claims: [], videoId });
+        return;
+      }
 
       resolve({
         claimKeys: Array.isArray(value?.claimKeys) ? value.claimKeys : [],
         claims: Array.isArray(value?.claims) ? value.claims : [],
+        videoId,
       });
     });
   });
@@ -935,13 +954,28 @@ function loadCachedAnalysis(videoId: string): Promise<CachedAnalysis> {
 function saveCachedAnalysis(videoId: string, claims: ExtensionClaim[]) {
   const claimKeys = claims.map(getClaimKey);
 
+  void removeLegacyAnalysisCaches();
+
   return chrome.storage.local.set({
-    [getAnalysisCacheKey(videoId)]: { claimKeys, claims },
+    [currentAnalysisCacheKey]: { claimKeys, claims, videoId },
   });
 }
 
-function getAnalysisCacheKey(videoId: string) {
-  return `claimlens:analysis:${videoId}`;
+function removeLegacyAnalysisCaches() {
+  return new Promise<void>((resolve) => {
+    chrome.storage.local.get(null, (items) => {
+      const legacyKeys = Object.keys(items).filter((key) =>
+        key.startsWith(legacyAnalysisCachePrefix),
+      );
+
+      if (legacyKeys.length === 0) {
+        resolve();
+        return;
+      }
+
+      chrome.storage.local.remove(legacyKeys, () => resolve());
+    });
+  });
 }
 
 function mergeReports(

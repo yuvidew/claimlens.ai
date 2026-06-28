@@ -18,7 +18,10 @@
       "run_at": "document_idle"
     }
   ],
-  "host_permissions": ["https://www.youtube.com/*", "http://localhost:3000/*"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://claimlens-ai.vercel.app/*"
+  ],
   "permissions": ["activeTab", "sidePanel", "storage", "tabs"],
   "side_panel": {
     "default_path": "side-panel.html"
