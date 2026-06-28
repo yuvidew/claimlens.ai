@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "ClaimLens AI",
+  "description": "Analyze YouTube claims with evidence from ClaimLens AI.",
+  "version": "0.1.0",
+  "action": {
+    "default_title": "ClaimLens AI",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["assets/content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": ["https://www.youtube.com/*", "http://localhost:3000/*"],
+  "permissions": ["activeTab", "sidePanel", "storage", "tabs"],
+  "side_panel": {
+    "default_path": "side-panel.html"
+  }
+}
